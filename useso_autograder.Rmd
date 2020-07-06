@@ -12,10 +12,7 @@ library(googlesheets4)
 ```
 
 ```{r}
-# Sheet Parameters
-id_exam_sheet <- 
-  "1KMEG7VwNhwdmPMEja1EQb50D6KEWQ7ZyhiplR46XnQw"
-
+# Constant Sheet Parameters
 id_students <- 
   "REDACTED"
 students_sheet <- "parseable"
@@ -23,6 +20,10 @@ students_sheet <- "parseable"
 id_exam_scores <- "1SxvZEQ4OuLvUywl8P15jeACnAdj8H5zMjr-cidvH_JI"
 
 # Exam Parameters
+id_exam_sheet <- 
+  "1KMEG7VwNhwdmPMEja1EQb50D6KEWQ7ZyhiplR46XnQw"
+
+exam_name <- "Practice Exam"
 exam_length <- 5
 exam_penalty <- 0 # fraction between 0 and 1
 
@@ -137,5 +138,5 @@ scores <-
   arrange(color, name)
 
 scores %>% 
-  sheet_write(ss = id_exam_scores, sheet = "Practice Exam")
+  sheet_write(ss = id_exam_scores, sheet = exam_name)
 ```

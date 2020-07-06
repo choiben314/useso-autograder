@@ -1,0 +1,141 @@
+---
+title: "useso_autograder"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(googlesheets4)
+```
+
+```{r}
+# Sheet Parameters
+id_exam_sheet <- 
+  "1KMEG7VwNhwdmPMEja1EQb50D6KEWQ7ZyhiplR46XnQw"
+
+id_students <- 
+  "REDACTED"
+students_sheet <- "parseable"
+
+id_exam_scores <- "1SxvZEQ4OuLvUywl8P15jeACnAdj8H5zMjr-cidvH_JI"
+
+# Exam Parameters
+exam_length <- 5
+exam_penalty <- 0 # fraction between 0 and 1
+
+exam_start <- mdy_hm("7/5/2020 6:15 PM", tz = "America/New_York")
+
+diff_start <- 
+  tribble(
+    ~color, ~diff,
+    "red", 11,
+    "orange", 0,
+    "yellow", 8,
+    "green", 0,
+    "blue", -4, 
+    "violet", 0, 
+    "indigo", 0,
+    "pink", 0
+  )
+
+# Grading Parameters
+single_point <- 1
+multi_point <- 1
+multi_extra_penalty <- 1
+```
+
+```{r}
+format_cols <- function(df) {
+  df %>% 
+    rename_all(
+      ~ str_to_lower(.) %>% 
+        str_replace_all(" ", "_")
+    )
+}
+```
+
+```{r}
+student_color <- 
+  id_students %>% 
+  read_sheet(sheet = students_sheet) %>% 
+  format_cols() %>% 
+  left_join(diff_start, by = "color") %>% 
+  mutate(
+    color = 
+      factor(
+        color, 
+        levels = diff_start$color
+      )
+  )
+
+exam_response <- 
+  id_exam_sheet %>% 
+  read_sheet() %>% 
+  format_cols() %>% 
+  drop_na(name) %>% 
+  mutate(timestamp = force_tz(timestamp, "America/Los_Angeles"))
+```
+
+```{r}
+key <- 
+  exam_response %>% 
+  pivot_longer(
+    cols = -c("timestamp", "name"),
+    names_prefix = "question_",
+    names_to = "question",
+    values_to = "response"
+  ) %>%
+  filter(name == "ANSWER_KEY") %>% 
+  select(question, key_response = response)
+
+all_scores <- 
+  exam_response %>% 
+  pivot_longer(
+    cols = -c("timestamp", "name"),
+    names_prefix = "question_",
+    names_to = "question",
+    values_to = "response"
+  ) %>%
+  filter(name != "ANSWER_KEY") %>% 
+  left_join(key, by = "question") %>% 
+  left_join(student_color, by = "name") %>% 
+  mutate(
+    duration = 
+      as.integer(60 * (timestamp - (exam_start + minutes(diff)))),
+    key_response = str_replace_all(key_response, " ", "") %>% str_split(","),
+    response = str_replace_all(response, " ", "") %>% str_split(","),
+    correct = 
+      map2(response, key_response, intersect) %>% map(length) %>% unlist(),
+    extra = map2(response, key_response, setdiff) %>% map(length) %>% unlist(),
+    num_choices = key_response %>% map(length) %>% unlist(),
+    raw_score = 
+      if_else(
+        num_choices == 1, 
+        single_point * correct - multi_extra_penalty * extra,
+        multi_point * correct - multi_extra_penalty * extra
+      ),
+    score = if_else(raw_score < 0, 0, raw_score)
+  )
+
+scores <- 
+  all_scores %>% 
+  count(timestamp, duration, color, name, wt = score, name = "score") %>%
+  mutate(
+    minutes_over = as.integer((duration - exam_length * 60) / 60),
+    score =
+      if_else(
+        minutes_over > 0,
+        score * (1 - exam_penalty * minutes_over),
+        score
+      ),
+    duration = as.integer(duration / 60)
+  ) %>% 
+  select(color, name, duration, score) %>% 
+  arrange(color, name)
+
+scores %>% 
+  sheet_write(ss = id_exam_scores, sheet = "Practice Exam")
+```

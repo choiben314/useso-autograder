@@ -18,25 +18,30 @@ id_students <-
 students_sheet <- "parseable"
 
 id_exam_scores <- "1SxvZEQ4OuLvUywl8P15jeACnAdj8H5zMjr-cidvH_JI"
+all_exams_name <- "All Exams"
 
 # Exam Parameters
+# Practice 1KMEG7VwNhwdmPMEja1EQb50D6KEWQ7ZyhiplR46XnQw
+# R&M 1sML9Fz-Qyn8xxJYYfh4qAEu-429ogiU3H0ih0YxVl-8
 id_exam_sheet <- 
-  "1KMEG7VwNhwdmPMEja1EQb50D6KEWQ7ZyhiplR46XnQw"
+  "1fny5u8Rx3xUgGN4Uakog3cvzoJtzJaKlq5HKXOAEbfE"
 
-exam_name <- "Practice Exam"
-exam_length <- 5
+exam_name <- "Geosphere Exam"
+exam_length <- 60
 exam_penalty <- 0 # fraction between 0 and 1
 
-exam_start <- mdy_hm("7/5/2020 6:15 PM", tz = "America/New_York")
+exam_start <- mdy_hm("7/7/2020 1:00 PM", tz = "America/New_York")
+timestamp_tz <- "America/Los_Angeles"
+
 
 diff_start <- 
   tribble(
     ~color, ~diff,
-    "red", 11,
+    "red", 0,
     "orange", 0,
-    "yellow", 8,
+    "yellow", 0,
     "green", 0,
-    "blue", -4, 
+    "blue", 0, 
     "violet", 0, 
     "indigo", 0,
     "pink", 0
@@ -46,6 +51,13 @@ diff_start <-
 single_point <- 1
 multi_point <- 1
 multi_extra_penalty <- 1
+
+exam_weights <- 
+  tribble(
+    ~name, ~weights,
+    "R&M Exam", 1,
+    "Geosphere Exam", 1
+  )
 ```
 
 ```{r}
@@ -55,6 +67,29 @@ format_cols <- function(df) {
       ~ str_to_lower(.) %>% 
         str_replace_all(" ", "_")
     )
+}
+
+read_exam_scores <- function(name, weight) {
+  weighted = str_c(name, "_weighted")
+  id_exam_scores %>% 
+    read_sheet(sheet = name) %>% 
+    format_cols() %>% 
+    transmute(
+      name, 
+      color, 
+      {{name}} := score, 
+      {{weighted}} := score * weight
+    ) %>% 
+    format_cols()
+}
+
+get_weights <- function(name) {
+  id_exam_scores %>% 
+    read_sheet(sheet = name) %>% 
+    format_cols() %>%
+    summarize(weights = 50 / median(score, na.rm = TRUE)) %>% 
+    mutate(name = name) %>% 
+    select(name, everything())
 }
 ```
 
@@ -77,10 +112,28 @@ exam_response <-
   read_sheet() %>% 
   format_cols() %>% 
   drop_na(name) %>% 
-  mutate(timestamp = force_tz(timestamp, "America/Los_Angeles"))
+  mutate(timestamp = force_tz(timestamp, timestamp_tz))
 ```
 
 ```{r}
+# Practical Exam, duration only
+# exam_response %>% 
+#   select(timestamp, name) %>% 
+#   left_join(student_color, by = "name") %>% 
+#   drop_na(color) %>% 
+#   mutate(
+#     duration = 
+#       as.integer(60 * (timestamp - (exam_start + minutes(diff)))),
+#     minutes_over = as.integer((duration - exam_length * 60) / 60),
+#     duration = as.integer(duration / 60)
+#   ) %>% 
+#   select(name, color, duration) %>% 
+#   arrange(color, name) %>% 
+#   sheet_write(ss = id_exam_scores, sheet = exam_name)
+```
+
+```{r}
+# Theoretical Exams, duration and scoring
 key <- 
   exam_response %>% 
   pivot_longer(
@@ -107,7 +160,10 @@ all_scores <-
     duration = 
       as.integer(60 * (timestamp - (exam_start + minutes(diff)))),
     key_response = str_replace_all(key_response, " ", "") %>% str_split(","),
-    response = str_replace_all(response, " ", "") %>% str_split(","),
+    response = 
+      str_replace_all(response, " ", "") %>% 
+      str_to_upper() %>% 
+      str_split(","),
     correct = 
       map2(response, key_response, intersect) %>% map(length) %>% unlist(),
     extra = map2(response, key_response, setdiff) %>% map(length) %>% unlist(),
@@ -138,5 +194,37 @@ scores <-
   arrange(color, name)
 
 scores %>% 
-  sheet_write(ss = id_exam_scores, sheet = exam_name)
+ sheet_write(ss = id_exam_scores, sheet = exam_name)
 ```
+
+```{r}
+exam_weights <- 
+  exam_weights %>%
+  pull(name) %>% 
+  map_dfr(get_weights)
+
+exam_weights %>%
+  mutate(weighted = map2(name, weights, read_exam_scores)) %>% 
+  pull(weighted) %>% 
+  reduce(left_join, by = c("name", "color")) %>% 
+  mutate(
+    all_exams_weighted = reduce(select(., ends_with("_weighted")), `+`)
+  ) %>% 
+  arrange(desc(all_exams_weighted)) %>% 
+  sheet_write(ss = id_exam_scores, sheet = all_exams_name)
+```
+
+```{r}
+key %>% 
+  mutate(
+    key_response = str_replace_all(key_response, " ", "") %>% str_split(","),
+    max_points = map(key_response, length) %>% unlist()
+  ) %>% 
+  summarize(max_correct = sum(max_points))
+```
+
+```{r}
+scores %>% 
+  summary()
+```
+
